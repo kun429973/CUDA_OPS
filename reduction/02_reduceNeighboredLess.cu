@@ -3,31 +3,26 @@
 
 
 /*
-GPU编程逻辑：
-    第一次循环中每个block中相邻两个thread上的数相加
-    第二次循环中相隔1个的两个thread上的数相加
-    依次循环
-    最后所有block中的数和都相加到threadIdx=0上面了。
-要求:
-    每个block中的线程数为偶数。
-缺点：
-    if((tid %(2 * stride)) == 0) 只对偶数的线程进行调度，导致线程束分化严重，拖慢计算效率。
+二，针对01_reduceNeighbored.cu 中 if((tid %(2 * stride)) == 0) 线程束分化严重，
+优化：使用 int index = 2 * stride * tid;防止线程束的分化，线程0->data[0],线程1->data[2] ...
+512个线程，16个线程束，仅使用前8个线程束就可以了。
 
-GPU程序执行时间: 15.880000 ms
+GPU程序执行时间: 13.580000 ms    
 */
 
 // CUDA核函数，执行并行规约操作
-__global__ void reduceNeighbored(int* g_odata, int* g_idata, unsigned int n) {
+__global__ void reduceNeighboredLess(int* g_odata, int* g_idata, unsigned int n) {
 
     unsigned int tid = threadIdx.x;
     unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;
-
+    
     int *idata = g_idata + blockIdx.x * blockDim.x;
 
     if(idx >= n) return;
     for(int stride=1; stride < blockDim.x; stride *= 2) {
-        if((tid %(2 * stride)) == 0) {
-            idata[tid] += idata[tid + stride];
+        int index = 2 * stride * tid;
+        if(index < blockDim.x) {
+            idata[index] += idata[index + stride];
         }
         __syncthreads();
     }
@@ -88,7 +83,7 @@ int main(int argc, char **argv) {
     gettimeofday(&time_start, NULL);
 
     cudaMemcpy(d_idata, h_idata, bytes, cudaMemcpyHostToDevice);
-    reduceNeighbored<<<grid, block>>>(d_odata, d_idata, size);
+    reduceNeighboredLess<<<grid, block>>>(d_odata, d_idata, size);
     cudaMemcpy(h_odata, d_odata, grid.x * sizeof(int), cudaMemcpyDeviceToHost);
 
     gettimeofday(&time_stop, NULL);
